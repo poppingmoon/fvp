@@ -4,8 +4,6 @@ macro(fvp_setup_deps)
     if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "[xX]64") # msvc
       set(MDK_SDK_PKG mdk-sdk-windows-desktop-vs2022-x64.7z)
     endif()
-  elseif(ANDROID)
-    set(MDK_SDK_PKG mdk-sdk-android.7z)
   elseif(LINUX OR CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(MDK_SDK_PKG mdk-sdk-linux.tar.xz)
     if(CMAKE_C_COMPILER_ARCHITECTURE_ID MATCHES "[xX].*64")
@@ -15,16 +13,11 @@ macro(fvp_setup_deps)
     endif()
   else()
   endif()
-  if("$ENV{FVP_DEPS_URL}" MATCHES "^http") # github release: https://github.com/wang-bin/mdk-sdk/releases/latest/download
-    set(FVP_DEPS_URL $ENV{FVP_DEPS_URL}) # TODO: md5
-  else()
-    set(FVP_DEPS_URL https://sourceforge.net/projects/mdk-sdk/files/nightly)
-  endif()
+  set(FVP_DEPS_URL https://github.com/wang-bin/mdk-sdk/releases/latest/download)
   set(MDK_SDK_URL ${FVP_DEPS_URL}/${MDK_SDK_PKG})
   set(MDK_SDK_SAVE "${CMAKE_CURRENT_SOURCE_DIR}/${MDK_SDK_PKG}")
 
   set(DOWNLOAD_MDK_SDK OFF)
-  message("FVP_DEPS_LATEST=$ENV{FVP_DEPS_LATEST}")
   # TODO: download from github option FVP_DEPS_LATEST_RELEASE=1
   if($ENV{FVP_DEPS_LATEST})
     if(EXISTS ${MDK_SDK_SAVE})

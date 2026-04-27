@@ -49,6 +49,9 @@ extension PlatformEx on Platform {
             'Frameworks', 'App.framework', 'flutter_assets', key);
       case 'android':
         return 'assets://flutter_assets/$key';
+      case 'ohos':
+        return path.join(path.dirname(Platform.resolvedExecutable), '..', '..',
+            'resources', 'flutter_assets', key);
     }
     return asset;
   }

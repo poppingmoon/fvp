@@ -1,8 +1,9 @@
-// Copyright 2022-2025 Wang Bin. All rights reserved.
+// Copyright 2022-2026 Wang Bin. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/widgets.dart'; //
 import 'package:flutter/services.dart';
@@ -10,13 +11,23 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'package:logging/logging.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:ffi/ffi.dart';
 import 'fvp_platform_interface.dart';
 import 'extensions.dart';
+import 'lib.dart';
 import 'media_info.dart';
 
 import '../mdk.dart' as mdk;
 
 final _log = Logger('fvp');
+
+// Default MDK_KEY bundled with this plugin. Users can override it by passing
+// {'global': {'MDK_KEY': '<key>'}} to registerWith().
+const _kDefaultMdkKey =
+    '4DF316BC71206BCEECD01559CC0FEDAF32DF8ECAE656BD9999CB821B67DB5B33'
+    '2B323F24539BA7172746B8F5A64CA67AF342B16BF4B418F76718B821F77BEA07'
+    '22F71DBC8EDF9431132FEAA633F0125072DF8DAC90268C62D0E4BA7D6DF9A6C4'
+    '976AB1146EC55FFD1945CAB4125B20D5C77976CF1BCB77B14C563868EA00EA07';
 
 class MdkVideoPlayer extends mdk.Player {
   final streamCtl = StreamController<VideoEvent>();
@@ -24,16 +35,15 @@ class MdkVideoPlayer extends mdk.Player {
 
   @override
   void dispose() {
-    onMediaStatus(null);
-    onEvent(null);
-    onStateChanged(null);
     streamCtl.close();
     _initialized = false;
     super.dispose();
   }
 
   MdkVideoPlayer() : super() {
-    onMediaStatus((oldValue, newValue) {
+    onMediaStatus.listen((event) {
+      final oldValue = event.oldValue;
+      final newValue = event.newValue;
       _log.fine(
           '$hashCode player$nativeHandle onMediaStatus: $oldValue => $newValue');
       if (!oldValue.test(mdk.MediaStatus.loaded) &&
@@ -44,7 +54,7 @@ class MdkVideoPlayer extends mdk.Player {
         //}
         if (_initialized) {
           _log.fine('$hashCode player$nativeHandle already initialized');
-          return true;
+          return;
         }
         _initialized = true;
         textureSize.then((size) {
@@ -67,10 +77,9 @@ class MdkVideoPlayer extends mdk.Player {
           newValue.test(mdk.MediaStatus.buffered)) {
         streamCtl.add(VideoEvent(eventType: VideoEventType.bufferingEnd));
       }
-      return true;
     });
 
-    onEvent((ev) {
+    onEvent.listen((ev) {
       _log.fine(
           '$hashCode player$nativeHandle onEvent: ${ev.category} - ${ev.detail} - ${ev.error}');
       if (ev.category == "reader.buffering") {
@@ -84,17 +93,17 @@ class MdkVideoPlayer extends mdk.Player {
       }
     });
 
-    onStateChanged((oldValue, newValue) {
+    onStateChanged.listen((event) {
       _log.fine(
-          '$hashCode player$nativeHandle onPlaybackStateChanged: $oldValue => $newValue');
-      if (newValue == mdk.PlaybackState.stopped) {
+          '$hashCode player$nativeHandle onPlaybackStateChanged: ${event.oldValue} => ${event.newValue}');
+      if (event.newValue == mdk.PlaybackState.stopped) {
         // FIXME: keep_open no stopped
         streamCtl.add(VideoEvent(eventType: VideoEventType.completed));
         return;
       }
       streamCtl.add(VideoEvent(
           eventType: VideoEventType.isPlayingStateUpdate,
-          isPlaying: newValue == mdk.PlaybackState.playing));
+          isPlaying: event.newValue == mdk.PlaybackState.playing));
     });
   }
 }
@@ -177,6 +186,7 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
         'ios': ['VT', 'FFmpeg', 'dav1d'],
         'linux': vdLinux,
         'android': ['AMediaCodec', 'FFmpeg', 'dav1d'],
+        'ohos': ['OH', 'FFmpeg', 'dav1d'],
       };
       _decoders = vd[Platform.operatingSystem];
     }
@@ -238,8 +248,13 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
           PlatformEx.assetUri(_subtitleFontFile ?? 'assets/subfont.ttf'));
     }
     _globalOpts?.forEach((key, value) {
+      if (key == 'MDK_KEY') return; // handled separately below
       mdk.setGlobalOption(key, value);
     });
+    final mdkKey = _globalOpts?['MDK_KEY'] as String? ?? _kDefaultMdkKey;
+    final k = mdkKey.toNativeUtf8();
+    Libfvp.setKey(k.cast());
+    malloc.free(k);
   }
 
   @override
@@ -332,9 +347,8 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
   @override
   Future<void> setLooping(int playerId, bool looping) async {
     final player = _players[playerId];
-    if (player != null) {
-      player.loop = looping ? -1 : 0;
-    }
+    if (player == null) return;
+    player.loop = looping ? -1 : 0;
   }
 
   @override
@@ -426,11 +440,6 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
   }
 
   Future<Uint8List?> snapshot(int playerId, {int? width, int? height}) async {
-    Uint8List? data;
-    final player = _players[playerId];
-    if (player == null) {
-      return data;
-    }
     return _players[playerId]?.snapshot(width: width, height: height);
   }
 
@@ -450,9 +459,7 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
 
   Future<void> step(int playerId, int frames) async {
     final player = _players[playerId];
-    if (player == null) {
-      return;
-    }
+    if (player == null) return;
     player.seek(
         position: frames,
         flags: const mdk.SeekFlag(mdk.SeekFlag.frame | mdk.SeekFlag.fromNow));
@@ -519,9 +526,8 @@ class MdkVideoPlayerPlatform extends VideoPlayerPlatform {
   Future<void> _seekToWithFlags(
       int playerId, Duration position, mdk.SeekFlag flags) async {
     final player = _players[playerId];
-    if (player == null) {
-      return;
-    }
+    if (player == null) return;
+
     if (player.isLive) {
       final bufMax = player.buffered();
       final pos = player.position;

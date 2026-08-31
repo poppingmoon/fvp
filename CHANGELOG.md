@@ -1,3 +1,15 @@
+# 0.38.1
+
+* align SPM mdk with CocoaPods (~> 0.38.0)
+
+# 0.38.0
+
+* add `onSubtitleText` for VideoPlayerController extension
+* cmake: support pinned sdk dependency
+* support platform view for android
+* support tunnel mode for android
+* fix resourceManager for ohos
+
 # 0.37.3
 
 * fix PrivacyInfo.xcprivacy for SPM
